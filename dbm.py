@@ -1,5 +1,5 @@
-import numpy, pandas, patsy
-class dbm(object):
+import numpy
+class DBM(object):
     # dataset: a binary valued data matrix
     # labels: the associated outputs for each data row
     # layers: a list containing the size of each hidden layer
@@ -58,7 +58,7 @@ class dbm(object):
         temp = fn(*args)
         temp_cutoff = numpy.random.rand(*temp.shape)
         return (temp>temp_cutoff).astype(float)
-
+    
 
     #This propagates the test state through the net, does sigmoid at each layer, and passes that along. 
     #Returns probs at the end, because why not.
@@ -81,7 +81,6 @@ class dbm(object):
             if not dangerous and i< len(self.layers)-1:
                 out =numpy.round(out)
         return out
-
 
     #The energy of a given layer with a given input and output vector
     def _energy(self,v,W,h):
@@ -181,8 +180,8 @@ class dbm(object):
                 prop_label=labels
                 if layer < layers-1:
                     prop_label = numpy.round(self.sigma(self.backprop_label(labels, layers-1-layer)))
-                act = numpy.round(self.sigma(self.predict_many_probs(rows, omit_layers=layers-layer-1)))
-                prior_act = numpy.round(self.sigma(self.predict_many_probs(rows, omit_layers=layers-layer)))
+                act = numpy.round(self.sigma(self.predict_many_probs(data, omit_layers=layers-layer-1)))
+                prior_act = numpy.round(self.sigma(self.predict_many_probs(data, omit_layers=layers-layer)))
                 W = self.layers[layer]['W']
                 #output layer
                 temp = (prop_label-act)
@@ -225,21 +224,4 @@ class dbm(object):
                 W = W - self.learning_rate*weight*gradient/scale_factor
                 self.layers[layer]['W']=W
         self.learning_rate=self.next_learning_rate(self.learning_rate)
-    
-
-test = numpy.random.randint(0, 2, (2,10))
-label =numpy.transpose(numpy.transpose(test)[1:3]).reshape(2,2)
-print test.shape, label.shape
-
-dataset  = numpy.random.randint(0, 2, (100000, 10))
-labels = numpy.transpose(numpy.transpose(dataset)[1:3]).reshape(100000,2)
-
-dbm_test=dbm(dataset,labels)
-print dbm_test.predict_many_probs(test), label
-print dbm_test.total_energy(), dbm_test.total_entropy()
-
-dbm_test.train_hybrid()
-print dbm_test.predict_many_probs(test),label
-print dbm_test.total_energy(), dbm_test.total_entropy()
-
 
