@@ -142,27 +142,8 @@ class DBM(object):
                                                                        self.layers[i+1]['fantasy'],))
 
 
-    #Train, or continue training the model according to the training schedule for another train_iterations iterations
-    def train_unsupervised(self, train_iterations=1000, gibbs_iterations=100):
-        for iter in range(train_iterations):
-            self.gibbs_update(gibbs_iterations)
-            data, labels = self.data_sample(self.batch_size)
-            rate = self.learning_rate
-            for i in range(1,len(self.layers)):
-                    if i==1:
-                        previous = data
-                    else:
-                        previous = self.layers[i-1]['mu']
-                    self.layers[i]['mu'] = self.sigma(numpy.einsum('ij,jk',previous,self.layers[i]['W']))
-                    
-                    gradient_part = 1.0/self.datapts * numpy.einsum('ki,kj', previous, 
-                                                                    self.layers[i]['mu'])
-                    approx_part = -1.0/self.fantasy_count * numpy.einsum('ki,kj',self.layers[i-1]['fantasy'],
-                                                                         self.layers[i]['fantasy'])
- 
-                    self.layers[i]['W'] = self.layers[i]['W'] + rate *(gradient_part + approx_part)
-            self.learning_rate=self.next_learning_rate(self.learning_rate)
-            
+
+    #backpropagate label assignments to previous layer.       
     def backprop_label(self, label, layers=0):
         end = len(self.layers)-1
         out = label
@@ -170,58 +151,69 @@ class DBM(object):
             W = self.layers[end-i]['W']
             out = numpy.einsum('kj,ij',W,out)
         return out
+
+
+    #This step is the backprop part
+    def supervised_step(self, data,labels,rate, weight):
+        layers=len(self.layers)
+        scale_factor = 1.0
+        for layer in range(layers-1,0,-1):
+            prop_label=labels
+            if layer < layers-1:
+                prop_label = numpy.round(self.sigma(self.backprop_label(labels, layers-1-layer)))
+            act = numpy.round(self.sigma(self.predict_many_probs(data, omit_layers=layers-layer-1)))
+            prior_act = numpy.round(self.sigma(self.predict_many_probs(data, omit_layers=layers-layer)))
+            W = self.layers[layer]['W']
+            #output layer
+            temp = (prop_label-act)
+            gradient= 1.0/self.batch_size * numpy.einsum('ik,ij',temp*self.d_sigma(temp),prior_act)
+            scale_factor = W.shape[0]*W.shape[1]*scale_factor
+            W = W - self.learning_rate*weight*gradient/scale_factor
+            self.layers[layer]['W']=W
+
+
+    #This step does the boltzmann part.
+    def unsupervised_step(self, data, labels,rate):
+        layers=len(self.layers)
+        for i in range(1,layers):
+            if i==1:
+                previous = data
+            else:
+                previous = self.layers[i-1]['mu']
+            self.layers[i]['mu'] = self.sigma(numpy.einsum('ij,jk',previous,self.layers[i]['W']))
+            
+            gradient_part = 1.0/self.datapts * numpy.einsum('ki,kj', previous, 
+                                                            self.layers[i]['mu'])
+            approx_part = -1.0/self.fantasy_count * numpy.einsum('ki,kj',self.layers[i-1]['fantasy'],
+                                                                 self.layers[i]['fantasy'])
+            self.layers[i]['W'] = self.layers[i]['W'] + rate *(gradient_part + approx_part)
+
+
+    #Train, or continue training the model according to the training schedule for another train_iterations iterations
+    def train_unsupervised(self, train_iterations=1000, gibbs_iterations=100):
+        for iter in range(train_iterations):
+            self.gibbs_update(gibbs_iterations)
+            data, labels = self.data_sample(self.batch_size)
+            rate = self.learning_rate
+            self.unsupervised_step(data,labels,rate)
+
+
     #Assuming the data came in with labels, which were disregarded during the unsupervised training.
     def train_supervised(self, train_iterations=1000, weight=.01):
         layers=len(self.layers)
         for iter in range(train_iterations):
             rows, labels = self.data_sample(self.batch_size)
-            scale_factor = 1.0
-            for layer in range(layers-1,0,-1):
-                prop_label=labels
-                if layer < layers-1:
-                    prop_label = numpy.round(self.sigma(self.backprop_label(labels, layers-1-layer)))
-                act = numpy.round(self.sigma(self.predict_many_probs(data, omit_layers=layers-layer-1)))
-                prior_act = numpy.round(self.sigma(self.predict_many_probs(data, omit_layers=layers-layer)))
-                W = self.layers[layer]['W']
-                #output layer
-                temp = (prop_label-act)
-                gradient= 1.0/self.batch_size * numpy.einsum('ik,ij',weight*temp*self.d_sigma(temp),prior_act)
-                scale_factor = W.shape[0]*W.shape[1]*scale_factor
-                W = W - gradient/scale_factor
-                self.layers[layer]['W']=W
+            self.supervised_step(rows, labels, self.learning_rate, weight)               
 
+ 
+    #Alternate boltzmann and backprop steps, this could be better than doing a lot of both, 
+    #as it helps to co-optimize the energy and entropy.
     def train_hybrid(self, train_iterations=1000, weight=.1, gibbs_iterations = 100 ):
-        layers=len(self.layers)
         for iter in range(train_iterations):
             self.gibbs_update(gibbs_iterations)
             data, labels = self.data_sample(self.batch_size)
             rate = self.learning_rate
-            for i in range(1,layers):
-                if i==1:
-                    previous = data
-                else:
-                    previous = self.layers[i-1]['mu']
-                self.layers[i]['mu'] = self.sigma(numpy.einsum('ij,jk',previous,self.layers[i]['W']))
-                
-                gradient_part = 1.0/self.datapts * numpy.einsum('ki,kj', previous, 
-                                                                self.layers[i]['mu'])
-                approx_part = -1.0/self.fantasy_count * numpy.einsum('ki,kj',self.layers[i-1]['fantasy'],
-                                                                     self.layers[i]['fantasy'])
-                self.layers[i]['W'] = self.layers[i]['W'] + rate *(gradient_part + approx_part)
-            
-            scale_factor = 1.0
-            for layer in range(layers-1,0,-1):
-                prop_label=labels
-                if layer < layers-1:
-                    prop_label = numpy.round(self.sigma(self.backprop_label(labels, layers-1-layer)))
-                act = numpy.round(self.sigma(self.predict_many_probs(data, omit_layers=layers-layer-1)))
-                prior_act = numpy.round(self.sigma(self.predict_many_probs(data, omit_layers=layers-layer)))
-                W = self.layers[layer]['W']
-                #output layer
-                temp = (prop_label-act)
-                gradient= 1.0/self.batch_size * numpy.einsum('ik,ij',temp*self.d_sigma(temp),prior_act)
-                scale_factor = W.shape[0]*W.shape[1]*scale_factor
-                W = W - self.learning_rate*weight*gradient/scale_factor
-                self.layers[layer]['W']=W
+            self.unsupervised_step(data,labels,rate)
+            self.supervised_step(data,labels,rate, weight)   
         self.learning_rate=self.next_learning_rate(self.learning_rate)
 
