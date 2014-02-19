@@ -7,7 +7,7 @@ class DBM(object):
     # learning_rate: starting learning rate. Will be continued harmonically from the starting value.
     def __init__(self,dataset,labels,
                 batch_size = 200,
-                layers=[25,10,5,2],
+                layers=[10,2],
                 fantasy_count = 30,
                 learning_rate = .1, ):
 
