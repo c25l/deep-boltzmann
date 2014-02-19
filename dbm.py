@@ -28,6 +28,7 @@ class DBM(object):
             hidden = {'layer':'hidden '+str(layer), 'size':size, 'mu':0}
             above = self.layers[-1]['size']
             hidden['W'] = numpy.random.randn(above,size)
+            hidden['momentum'] = numpy.zeros((above,size))
             hidden['fantasy'] = numpy.random.randint(0,2,(fantasy_count,size)).astype(float)
             self.layers.append(hidden)
         
@@ -36,7 +37,14 @@ class DBM(object):
     #  starting value the sequence is in l^2-l^1
     def next_learning_rate(self, rate):
         return 1.0/(1.0/rate+1)
+    
+    #calculate the row-wise norm of a matrix, returning a vector whose elements are the row's norms. 
+    def normalize(self, weights):
+        norms = 1/numpy.sqrt(numpy.einsum('ij->i',weights*weights))
+        norms = norms.repeat(weights.shape[1]).reshape(*weights.shape)
+        return weights*norms
 
+        
     #some sigmoid function, this one is fine.
     def sigma(self, x):
         return 1/(1+numpy.exp(-x))
@@ -61,26 +69,19 @@ class DBM(object):
     
 
     #This propagates the test state through the net, does sigmoid at each layer, and passes that along. 
-    #Returns probs at the end, because why not.
-    def predict_probs(self, test, dangerous=False, omit_layers=0):
-        out = test
-        for i in range(1,len(self.layers)-omit_layers):
-            out = self.sigma(numpy.einsum('i,ij',out,self.layers[i]['W']))
-            if not dangerous and i< len(self.layers)-1:
-                out =numpy.round(out)
-        return out
-
-
-    #This propagates the test state through the net, does sigmoid at each layer, and passes that along. 
     # Returns probs at the end, because why not.
-    def predict_many_probs(self, test, dangerous=False, omit_layers=0):
+    def predict_probs(self, test, prop_uncertainty=False, omit_layers=0): 
         out = test
         for i in range(1,len(self.layers)-omit_layers):
-            W = self.layers[i]['W']
-            out = self.sigma(numpy.einsum('ji,ik',out,W))
-            if not dangerous and i< len(self.layers)-1:
+            W=self.layers[i]['W']
+            out = self._predict_stage_probs(W,out)
+            if not prop_uncertainty and i< len(self.layers)-1:
                 out =numpy.round(out)
         return out
+    
+    def _predict_stage_probs(self,W,inputs):
+        return self.sigma(numpy.einsum('ji,ik',inputs,W))
+
 
     #The energy of a given layer with a given input and output vector
     def _energy(self,v,W,h):
@@ -110,7 +111,7 @@ class DBM(object):
 
     #return the total entropy of the dataset given the current model.
     def total_entropy(self):
-        pred = self.predict_many_probs(self.dataset)
+        pred = self.predict_probs(self.dataset)
         return numpy.sum(self.labels*numpy.log(pred) + (1-self.labels)*numpy.log(1-pred))
     
     
@@ -160,9 +161,9 @@ class DBM(object):
         for layer in range(layers-1,0,-1):
             prop_label=labels
             if layer < layers-1:
-                prop_label = numpy.round(self.sigma(self.backprop_label(labels, layers-1-layer)))
-            act = numpy.round(self.sigma(self.predict_many_probs(data, omit_layers=layers-layer-1)))
-            prior_act = numpy.round(self.sigma(self.predict_many_probs(data, omit_layers=layers-layer)))
+                prop_label = self.sigma(self.backprop_label(labels, layers-1-layer))
+            act = self.sigma(self.predict_probs(data, omit_layers=layers-layer-1))
+            prior_act = self.sigma(self.predict_probs(data, omit_layers=layers-layer))
             W = self.layers[layer]['W']
             #output layer
             temp = (prop_label-act)
@@ -186,7 +187,46 @@ class DBM(object):
                                                             self.layers[i]['mu'])
             approx_part = -1.0/self.fantasy_count * numpy.einsum('ki,kj',self.layers[i-1]['fantasy'],
                                                                  self.layers[i]['fantasy'])
-            self.layers[i]['W'] = self.layers[i]['W'] + rate *(gradient_part + approx_part)
+            self.layers[i]['W'] = self.normalize(self.layers[i]['W'] + rate *(gradient_part + approx_part))
+
+
+    #This is a modification of supervised_step to do dropout method stuff.
+    def dropout_step(self,data,labels,rate,weight, fraction = .5, momentum_decay = .5):
+        layers=len(self.layers)
+        scale_factor = 1.0
+        for layer in range(layers-1,0,-1):
+            W=self.layers[layer]['W']
+            #This is not the dropout matrix, this is its opposite.
+            temp = numpy.zeros(W.shape)
+            while numpy.max(temp) <= 0 or numpy.min(temp) >=1:
+                temp = (numpy.random.rand(*W.shape)<fraction).astype(float)
+            self.layers[layer]['dropout array']= 1-temp
+            self.layers[layer]['dropped out'] = W*temp
+            W = W-self.layers[layer]['dropped out']
+            self.layers[layer]['W']=W 
+            
+        for layer in range(layers-1,0,-1):
+            prop_label=labels
+            if layer < layers-1:
+                prop_label = numpy.round(self.sigma(self.backprop_label(labels, layers-1-layer)))
+            act = numpy.round(self.sigma(self.predict_probs(data, omit_layers=layers-layer-1)))
+            prior_act = numpy.round(self.sigma(self.predict_probs(data, omit_layers=layers-layer)))
+            W = self.layers[layer]['W']
+            #output layer
+            dropout =  self.layers[layer]['dropout array']
+            temp = (prop_label-act)
+            gradient= 1.0/self.batch_size * numpy.einsum('ik,ij',temp*self.d_sigma(temp),prior_act)
+            #scale_factor = numpy.sum(dropout)*scale_factor
+            momentum = self.layers[layer]['momentum']
+            gradient_term = self.learning_rate*weight*gradient/scale_factor*dropout
+            W = W-gradient_term -momentum*momentum_decay
+            self.layers[layer]['momentum'] = momentum*momentum_decay + gradient_term
+            self.layers[layer]['W']=W
+            
+        for layer in range(layers-1,0,-1):
+            W=self.layers[layer]['W']
+            W = W+self.layers[layer]['dropped out'] 
+            self.layers[layer]['W'] = self.normalize(W)
 
 
     #Train, or continue training the model according to the training schedule for another train_iterations iterations
@@ -205,6 +245,15 @@ class DBM(object):
             rows, labels = self.data_sample(self.batch_size)
             self.supervised_step(rows, labels, self.learning_rate, weight)               
 
+    
+    #Assuming the data came in with labels, which were disregarded during the unsupervised training.
+    def train_dropout(self, train_iterations=1000, weight=.01):
+        layers=len(self.layers)
+        for iter in range(train_iterations):
+            rows, labels = self.data_sample(self.batch_size)
+            self.dropout_step(rows, labels, self.learning_rate, weight)               
+
+
  
     #Alternate boltzmann and backprop steps, this could be better than doing a lot of both, 
     #as it helps to co-optimize the energy and entropy.
@@ -214,6 +263,6 @@ class DBM(object):
             data, labels = self.data_sample(self.batch_size)
             rate = self.learning_rate
             self.unsupervised_step(data,labels,rate)
-            self.supervised_step(data,labels,rate, weight)   
+            self.dropout_step(data,labels,rate, weight)   
         self.learning_rate=self.next_learning_rate(self.learning_rate)
 
