@@ -9,7 +9,7 @@ class DBM(object):
                 batch_size = 200,
                 layers=[10,2],
                 fantasy_count = 30,
-                learning_rate = .1, ):
+                learning_rate = .001, ):
 
         self.dataset = dataset
         self.labels = labels
@@ -40,8 +40,12 @@ class DBM(object):
     
     #calculate the row-wise norm of a matrix, returning a vector whose elements are the row's norms. 
     def normalize(self, weights):
-        norms = 1/numpy.sqrt(numpy.einsum('ij->i',weights*weights))
-        norms = norms.repeat(weights.shape[1]).reshape(*weights.shape)
+        norms = 1/(numpy.sqrt(numpy.einsum('ij->j',weights*weights))+.000001)
+        norms = norms.reshape(norms.shape[0],1)
+        ones = numpy.ones(norms.shape)
+        norms = numpy.append(norms,ones,1)
+        norms = numpy.max(norms,1) 
+        norms = norms.reshape(1,norms.shape[0]).repeat(weights.shape[0], axis=0)
         return weights*norms
 
         
@@ -176,7 +180,8 @@ class DBM(object):
     #This step does the boltzmann part.
     def unsupervised_step(self, data, labels,rate):
         layers=len(self.layers)
-        for i in range(1,layers):
+        #You could train the last layer too, but as the last layer communicates the objective information to the world, this doesn't help you so much as just ruin all predictions.
+        for i in range(1,layers-1):
             if i==1:
                 previous = data
             else:
@@ -191,42 +196,45 @@ class DBM(object):
 
 
     #This is a modification of supervised_step to do dropout method stuff.
-    def dropout_step(self,data,labels,rate,weight, fraction = .5, momentum_decay = .5):
+    def dropout_step(self,data,labels,rate,weight, fraction = .5, momentum_decay = 0):
         layers=len(self.layers)
         scale_factor = 1.0
         for layer in range(layers-1,0,-1):
             W=self.layers[layer]['W']
-            #This is not the dropout matrix, this is its opposite.
-            temp = numpy.zeros(W.shape)
-            while numpy.max(temp) <= 0 or numpy.min(temp) >=1:
-                temp = (numpy.random.rand(*W.shape)<fraction).astype(float)
-            self.layers[layer]['dropout array']= 1-temp
-            self.layers[layer]['dropped out'] = W*temp
+            dropout = numpy.zeros(W.shape)
+            while numpy.min(dropout) >=1:
+                dropout = (numpy.random.rand(*W.shape)<fraction).astype(float)
+            self.layers[layer]['dropout array']= dropout
+            self.layers[layer]['dropped out'] = W*dropout
             W = W-self.layers[layer]['dropped out']
-            self.layers[layer]['W']=W 
+            self.layers[layer]['W']=W
             
         for layer in range(layers-1,0,-1):
             prop_label=labels
             if layer < layers-1:
                 prop_label = numpy.round(self.sigma(self.backprop_label(labels, layers-1-layer)))
-            act = numpy.round(self.sigma(self.predict_probs(data, omit_layers=layers-layer-1)))
-            prior_act = numpy.round(self.sigma(self.predict_probs(data, omit_layers=layers-layer)))
+            act = self.sigma(self.predict_probs(data, omit_layers=layers-layer-1))
+            prior_act = self.sigma(self.predict_probs(data, omit_layers=layers-layer))
             W = self.layers[layer]['W']
             #output layer
             dropout =  self.layers[layer]['dropout array']
             temp = (prop_label-act)
-            gradient= 1.0/self.batch_size * numpy.einsum('ik,ij',temp*self.d_sigma(temp),prior_act)
-            #scale_factor = numpy.sum(dropout)*scale_factor
+            gradient= numpy.einsum('ik,ij',temp*self.d_sigma(temp),prior_act)/data.shape[0]
+            scale_factor = numpy.sum(1-dropout)*scale_factor
             momentum = self.layers[layer]['momentum']
-            gradient_term = self.learning_rate*weight*gradient/scale_factor*dropout
-            W = W-gradient_term -momentum*momentum_decay
+            #if 'last_gradient' in self.layers[layer]:
+                
+            #    print gradient - self.layers[layer]['last_gradient'] 
+            #self.layers[layer]['last_gradient'] = gradient
+            gradient_term = weight * gradient / scale_factor * (1-dropout)
+            W = W + gradient_term  + momentum*momentum_decay
             self.layers[layer]['momentum'] = momentum*momentum_decay + gradient_term
             self.layers[layer]['W']=W
             
         for layer in range(layers-1,0,-1):
-            W=self.layers[layer]['W']
+            W=self.normalize(self.layers[layer]['W'])
             W = W+self.layers[layer]['dropped out'] 
-            self.layers[layer]['W'] = self.normalize(W)
+            self.layers[layer]['W'] = W
 
 
     #Train, or continue training the model according to the training schedule for another train_iterations iterations
@@ -236,6 +244,7 @@ class DBM(object):
             data, labels = self.data_sample(self.batch_size)
             rate = self.learning_rate
             self.unsupervised_step(data,labels,rate)
+            self.learning_rate=self.next_learning_rate(self.learning_rate)
 
 
     #Assuming the data came in with labels, which were disregarded during the unsupervised training.
@@ -247,11 +256,13 @@ class DBM(object):
 
     
     #Assuming the data came in with labels, which were disregarded during the unsupervised training.
-    def train_dropout(self, train_iterations=1000, weight=.01):
+    def train_dropout(self, train_iterations=1000, weight=1):
         layers=len(self.layers)
         for iter in range(train_iterations):
+            rate = self.learning_rate
             rows, labels = self.data_sample(self.batch_size)
-            self.dropout_step(rows, labels, self.learning_rate, weight)               
+            self.dropout_step(rows, labels, self.learning_rate, rate*weight)               
+        self.learning_rate=self.next_learning_rate(self.learning_rate)
 
 
  
