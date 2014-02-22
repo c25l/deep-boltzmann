@@ -23,6 +23,7 @@ for i in range(10):
 print dbm_test.layers[1]['W']
 print dbm_test.layers[-1]['W']
 dbm_test.learning_rate=1
+
 for i in range(1000):
     print 'beginning dropout training of model'
     dbm_test.train_dropout(weight = .01)

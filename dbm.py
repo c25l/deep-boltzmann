@@ -40,7 +40,7 @@ class DBM(object):
     
     #calculate the row-wise norm of a matrix, returning a vector whose elements are the row's norms. 
     def normalize(self, weights):
-        norms = 1/(numpy.sqrt(numpy.einsum('ij->j',weights*weights))+.000001)
+        norms = 1/(numpy.sqrt(numpy.sum(weights*weights, axis=0))+.000001)
         norms = norms.reshape(norms.shape[0],1)
         ones = numpy.ones(norms.shape)
         norms = numpy.append(norms,ones,1)
@@ -84,12 +84,12 @@ class DBM(object):
         return out
     
     def _predict_stage_probs(self,W,inputs):
-        return self.sigma(numpy.einsum('ji,ik',inputs,W))
+        return self.sigma(numpy.dot(inputs,W))
 
 
     #The energy of a given layer with a given input and output vector
     def _energy(self,v,W,h):
-        return -numpy.einsum('ji,ik,jk',v,W,h)
+        return -numpy.tensordot(numpy.dot(v,W),h, axes=([0,1],[0,1]))
 
     
     #The energy of the whole DBM with given inputs and hidden activations
@@ -102,9 +102,9 @@ class DBM(object):
     
     #The energy of the network given only the input activiation.
     def energy(self, v):
-        hs = [numpy.round(self.sigma(numpy.einsum('ik,ji',self.layers[1]['W'],v)))]
+        hs =  [numpy.round(self.sigma(numpy.dot(v,self.layers[1]['W'])))]
         for i in range(2,len(self.layers)):
-            hs.append(numpy.round(self.sigma(numpy.einsum('ik,ji',self.layers[i]['W'],hs[-1]))))
+            hs.append(numpy.round(self.sigma(numpy.dot(hs[-1], self.layers[i]['W']))))
         return self.internal_energy(v,tuple(hs))
     
 
@@ -122,17 +122,17 @@ class DBM(object):
     # prob_given_vis gives a vector of length j with the corresponding probs
     # subset to theappropriate entry to get hj1==1
     def prob_given_vis(self, W, vs):
-        return self.sigma(numpy.einsum('ik, ji', W, vs))
+        return self.sigma(numpy.dot(vs, W))
 
 
     #prob_given_out is the same as above, but with the opposite value  and convention.
     def prob_given_out(self, W, hs):
-        return self.sigma(numpy.einsum('kj, ij', W, hs))
+        return self.sigma(numpy.dot( hs, W.T))
 
 
     #for deeper nets, you need the above-and-below layer contributions. This aggregates both1
     def prob_internal(self, W0, W1, vs, h2):
-        return self.sigma(numpy.einsum('ik, ji', W0, vs)+numpy.einsum('kj, ij', W1, h2))
+        return self.sigma(numpy.dot(vs, W0)+numpy.dot(h2,  W1.T))
 
 
     #Tiny gibbs sampler for the fantasy particle updates. The numer of iterations could be controlled, but needn't be
@@ -154,7 +154,7 @@ class DBM(object):
         out = label
         for i in range(min(layers,end)):
             W = self.layers[end-i]['W']
-            out = numpy.einsum('kj,ij',W,out)
+            out = numpy.dot(out, W.T)
         return out
 
 
@@ -171,7 +171,7 @@ class DBM(object):
             W = self.layers[layer]['W']
             #output layer
             temp = (prop_label-act)
-            gradient= 1.0/self.batch_size * numpy.einsum('ik,ij',temp*self.d_sigma(temp),prior_act)
+            gradient= 1.0/self.batch_size * numpy.dot(prior_act.T,temp*self.d_sigma(temp))
             scale_factor = W.shape[0]*W.shape[1]*scale_factor
             W = W - self.learning_rate*weight*gradient/scale_factor
             self.layers[layer]['W']=W
@@ -186,11 +186,11 @@ class DBM(object):
                 previous = data
             else:
                 previous = self.layers[i-1]['mu']
-            self.layers[i]['mu'] = self.sigma(numpy.einsum('ij,jk',previous,self.layers[i]['W']))
+            self.layers[i]['mu'] = self.sigma(numpy.dot(previous,self.layers[i]['W']))
             
-            gradient_part = 1.0/self.datapts * numpy.einsum('ki,kj', previous, 
-                                                            self.layers[i]['mu'])
-            approx_part = -1.0/self.fantasy_count * numpy.einsum('ki,kj',self.layers[i-1]['fantasy'],
+            gradient_part = 1.0/self.datapts * numpy.dot(previous.T, 
+                                                         self.layers[i]['mu'])
+            approx_part = -1.0/self.fantasy_count * numpy.dot(self.layers[i-1]['fantasy'].T,
                                                                  self.layers[i]['fantasy'])
             self.layers[i]['W'] = self.normalize(self.layers[i]['W'] + rate *(gradient_part + approx_part))
 
@@ -219,7 +219,7 @@ class DBM(object):
             #output layer
             dropout =  self.layers[layer]['dropout array']
             temp = (prop_label-act)
-            gradient= numpy.einsum('ik,ij',temp*self.d_sigma(temp),prior_act)/data.shape[0]
+            gradient= numpy.dot(prior_act.T, temp*self.d_sigma(temp))/data.shape[0]
             scale_factor = numpy.sum(1-dropout)*scale_factor
             momentum = self.layers[layer]['momentum']
             #if 'last_gradient' in self.layers[layer]:
