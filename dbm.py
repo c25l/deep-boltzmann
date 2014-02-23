@@ -6,9 +6,9 @@ class DBM(object):
     # fantasy_count: The number of markov chains to run in the background
     # learning_rate: starting learning rate. Will be continued harmonically from the starting value.
     def __init__(self,dataset,labels,
-                batch_size = 200,
+                batch_size = 100,
                 layers=[10,2],
-                fantasy_count = 200,
+                fantasy_count = 100,
                 learning_rate = .001, ):
 
         self.dataset = dataset
@@ -168,10 +168,10 @@ class DBM(object):
                 previous = data
             else:
                 previous = self.layers[i-1]['mu']
-            self.layers[i]['mu'] = self.sigma(numpy.dot(previous,self.layers[i]['W']))
+            self.layers[i]['mu'] = self.sigma(numpy.dot(previous,self.layers[i]['W']))/data.shape[0]
             
-            gradient_part = 1.0/data.shape[0] * numpy.dot(previous.T, 
-                                                         self.layers[i]['mu'])
+            gradient_part = numpy.dot(previous.T, 
+                                      self.layers[i]['mu'])
             approx_part = -1.0/self.fantasy_count * numpy.dot(self.layers[i-1]['fantasy'].T,
                                                                  self.layers[i]['fantasy'])
             self.layers[i]['W'] = self.normalize(self.layers[i]['W'] 
@@ -205,16 +205,12 @@ class DBM(object):
             dropout =  self.layers[layer]['dropout array']
             difference = act - prop_label
             d_activated = self.d_sigma(self.sigma_inverse(act))
-            #Aiming to minimize square error..
-#            gradient= 2*numpy.dot(prior_act.T, 
-#                                  (difference* d_activated)
-#                                   /data.shape[0])
             
             #Aiming to for deviance.
             difference = numpy.clip(difference,0.001,.9999)
-            gradient = -((numpy.dot(prior_act.T,1/difference*d_activated)) 
-                          - numpy.dot(1-prior_act.T,1/(difference)*d_activated))
-            scale_factor = numpy.sqrt(numpy.sum(1-dropout))*scale_factor
+            gradient = ((-numpy.dot(prior_act.T,1/difference*d_activated)) 
+                          + numpy.dot(1-prior_act.T,1/(difference)*d_activated))
+            #scale_factor = numpy.sqrt(numpy.sum(1-dropout))*scale_factor
             momentum = self.layers[layer]['momentum']
             gradient_term = weight * gradient / scale_factor * (1-dropout)
             W = W - gradient_term  -  momentum*momentum_decay
@@ -228,7 +224,7 @@ class DBM(object):
 
 
     #Train, or continue training the model according to the training schedule for another train_iterations iterations
-    def train_unsupervised(self, train_iterations=1000, gibbs_iterations=100):
+    def train_unsupervised(self, train_iterations=1000, gibbs_iterations=10):
         for iter in range(train_iterations):
             self.gibbs_update(gibbs_iterations)
             data, labels = self.data_sample(self.batch_size)
@@ -241,45 +237,29 @@ class DBM(object):
     def train_supervised(self, train_iterations=1000, weight=.01):
         layers=len(self.layers)
         for iter in range(train_iterations):
-            rows, labels = self.data_sample(10*self.batch_size)
+            rows, labels = self.data_sample(self.batch_size)
             self.dropout_step(rows, labels, self.learning_rate, weight, dropout_fraction=0.0)
 
     
     #Assuming the data came in with labels, which were disregarded during the unsupervised training.
     def train_dropout(self, train_iterations=1000, weight=1):
         layers=len(self.layers)
-        for layer in range(1,layers): 
-            self.layers[layer]['W_prev'] = self.layers[layer]['W']
-        new_data,new_labels = self.data_sample(self.batch_size)
-        bef_pred = self.predict_probs(new_data)
-        bef_acc = 1-numpy.abs(numpy.round(bef_pred)-new_labels).sum()/new_labels.shape[0]
-        bef_entropy =  numpy.sum(new_labels*numpy.log(bef_pred) + (1-new_labels)*numpy.log(1-bef_pred))
         for iter in range(train_iterations):
             rate = self.learning_rate
             rows, labels = self.data_sample(self.batch_size)
             self.dropout_step(rows, labels, self.learning_rate, rate*weight)               
-        aft_pred = self.predict_probs(new_data)
-        aft_entropy =  numpy.sum(new_labels*numpy.log(aft_pred) + (1-new_labels)*numpy.log(1-aft_pred))
-        aft_acc = 1-numpy.abs(numpy.round(aft_pred)-new_labels).sum()/new_labels.shape[0]
-        if aft_acc < bef_acc and aft_entropy<bef_entropy:
-            print "epoch rejected"
-            for layer in range(1,layers):
-                self.layers[layer]['W']=self.layers[layer]['W_prev']
-        else:
-            print "accepted"
-
         self.learning_rate=self.next_learning_rate(self.learning_rate)
 
 
  
     #Alternate boltzmann and backprop steps, this could be better than doing a lot of both, 
     #as it helps to co-optimize the energy and entropy.
-    def train_hybrid(self, train_iterations=1000, weight=.01, gibbs_iterations = 100 ):
+    def train_hybrid(self, train_iterations=1000, gibbs_iterations = 100 ):
         for iter in range(train_iterations):
             self.gibbs_update(gibbs_iterations)
             data, labels = self.data_sample(self.batch_size)
             rate = self.learning_rate
             self.unsupervised_step(data,labels,rate)
-            self.dropout_step(data,labels,rate, 10*weight)   
+            self.dropout_step(data,labels,rate, 10*rate)   
         self.learning_rate=self.next_learning_rate(self.learning_rate)
 

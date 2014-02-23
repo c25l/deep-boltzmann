@@ -15,8 +15,8 @@ def render_output():
     joblib.dump(energy, 'dbm_energy')
     joblib.dump(entropy, 'dbm_entropy')
     joblib.dump(accuracy, 'dbm_accuracy')
-    #print dbm_test.layers[1]['W']
-    #print dbm_test.layers[2]['W']
+    print dbm_test.layers[1]['W']
+    print dbm_test.layers[2]['W']
 
 
 np.random.seed(1)
@@ -32,10 +32,10 @@ energy = []
 entropy = []
 accuracy = []
 print 'initializing model'
-dbm_test=DBM(dataset,labels, layers=[12,1])
+dbm_test=DBM(dataset,labels, layers=[24,1], batch_size=100)
 render_output()
 
-for i in range(5):
+for i in range(3):
     print 'beginning hybrid training of model'
     dbm_test.train_hybrid()
     render_output()
@@ -43,7 +43,7 @@ dbm_test.learning_rate=1
 
 for i in range(1000):
     print 'beginning dropout training of model'
-    dbm_test.train_dropout(weight = 0.01)
+    dbm_test.train_dropout(weight = 0.001)
     render_output()
 
 
