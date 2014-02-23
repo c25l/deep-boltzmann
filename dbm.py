@@ -170,7 +170,7 @@ class DBM(object):
                 previous = self.layers[i-1]['mu']
             self.layers[i]['mu'] = self.sigma(numpy.dot(previous,self.layers[i]['W']))
             
-            gradient_part = 1.0/self.datapts * numpy.dot(previous.T, 
+            gradient_part = 1.0/data.shape[0] * numpy.dot(previous.T, 
                                                          self.layers[i]['mu'])
             approx_part = -1.0/self.fantasy_count * numpy.dot(self.layers[i-1]['fantasy'].T,
                                                                  self.layers[i]['fantasy'])
@@ -181,6 +181,7 @@ class DBM(object):
 
     #This is stochastic gradient descent version of a dropout back-propagator.
     def dropout_step(self,data,labels,rate,weight, dropout_fraction = .5, momentum_decay = 0.25250):
+        
         layers=len(self.layers)
         scale_factor = 1.0
         for layer in range(layers-1,0,-1):
@@ -247,10 +248,26 @@ class DBM(object):
     #Assuming the data came in with labels, which were disregarded during the unsupervised training.
     def train_dropout(self, train_iterations=1000, weight=1):
         layers=len(self.layers)
+        for layer in range(1,layers): 
+            self.layers[layer]['W_prev'] = self.layers[layer]['W']
+        new_data,new_labels = self.data_sample(self.batch_size)
+        bef_pred = self.predict_probs(new_data)
+        bef_acc = 1-numpy.abs(numpy.round(bef_pred)-new_labels).sum()/new_labels.shape[0]
+        bef_entropy =  numpy.sum(new_labels*numpy.log(bef_pred) + (1-new_labels)*numpy.log(1-bef_pred))
         for iter in range(train_iterations):
             rate = self.learning_rate
             rows, labels = self.data_sample(self.batch_size)
             self.dropout_step(rows, labels, self.learning_rate, rate*weight)               
+        aft_pred = self.predict_probs(new_data)
+        aft_entropy =  numpy.sum(new_labels*numpy.log(aft_pred) + (1-new_labels)*numpy.log(1-aft_pred))
+        aft_acc = 1-numpy.abs(numpy.round(aft_pred)-new_labels).sum()/new_labels.shape[0]
+        if aft_acc < bef_acc and aft_entropy<bef_entropy:
+            print "epoch rejected"
+            for layer in range(1,layers):
+                self.layers[layer]['W']=self.layers[layer]['W_prev']
+        else:
+            print "accepted"
+
         self.learning_rate=self.next_learning_rate(self.learning_rate)
 
 

@@ -15,8 +15,8 @@ def render_output():
     joblib.dump(energy, 'dbm_energy')
     joblib.dump(entropy, 'dbm_entropy')
     joblib.dump(accuracy, 'dbm_accuracy')
-    print dbm_test.layers[1]['W']
-    print dbm_test.layers[2]['W']
+    #print dbm_test.layers[1]['W']
+    #print dbm_test.layers[2]['W']
 
 
 np.random.seed(1)
@@ -35,7 +35,7 @@ print 'initializing model'
 dbm_test=DBM(dataset,labels, layers=[12,1])
 render_output()
 
-for i in range(15):
+for i in range(5):
     print 'beginning hybrid training of model'
     dbm_test.train_hybrid()
     render_output()
