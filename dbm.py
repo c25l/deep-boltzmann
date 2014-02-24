@@ -9,7 +9,8 @@ class DBM(object):
                 batch_size = 100,
                 layers=[10,2],
                 fantasy_count = 100,
-                learning_rate = .001, ):
+                learning_rate = .00005, ):
+
 
         self.dataset = dataset
         self.labels = labels
@@ -38,26 +39,19 @@ class DBM(object):
     def next_learning_rate(self, rate):
         return 1.0/(1.0/rate+1)
     
-    #calculate the row-wise norm of a matrix, returning a vector whose elements are the row's norms. 
-    def normalize(self, weights):
-        norms = 1/(numpy.sqrt(numpy.sum(weights*weights, axis=0))+.000001)
+    
+    def l2_pressure(self,weights):
+        norms = numpy.sqrt(numpy.sum(weights*weights, axis=0))
         norms = norms.reshape(norms.shape[0],1)
-        norms = numpy.clip(norms,0,1)
-        norms = norms.reshape(1,norms.shape[0]).repeat(weights.shape[0], axis=0)
-        return weights*norms
+        norms = norms.T.repeat(weights.shape[0], axis=0)
+        return -.01*norms*weights
 
-        
     #some sigmoid function, this one is fine.
     def sigma(self, x):
+        x = numpy.clip(x,-100,100)
         return 1/(1+numpy.exp(-x))
 
-    def d_sigma(self, x):
-        return self.sigma(x)*self.sigma(1-x)
     
-    def sigma_inverse(self, x):
-        x = numpy.clip(x, .0001,.9999)
-        return numpy.log(x/(1-x))
-
     #Quick and dirty bootstrapper to manage samples per epoch
     def data_sample(self, num):
         return (self.dataset[numpy.random.randint(0, self.dataset.shape[0], num)],
@@ -71,7 +65,8 @@ class DBM(object):
         return (temp>temp_cutoff).astype(float)
     
 
-    #This propagates the test state through the net, does sigmoid at each layer, and passes that along. 
+    #This propagates the test state through the net, 
+    #does sigmoid at each layer, and passes that along. 
     # Returns probs at the end, because why not.
     def predict_probs(self, test, prop_uncertainty=False, omit_layers=0): 
         out = test
@@ -107,14 +102,15 @@ class DBM(object):
         return self.internal_energy(v,tuple(hs))
     
 
-    #return the total energy of the stored dataset and its activation structure given the current model
+    #return the total energy of the stored dataset 
+    #and its activation structure given the current model
     def total_energy(self):
         return self.energy(self.dataset)
     
 
     #return the total entropy of the dataset given the current model.
     def total_entropy(self):
-        pred = self.predict_probs(self.dataset)
+        pred = numpy.clip(self.predict_probs(self.dataset),0.0001,.9999)
         return numpy.sum(self.labels*numpy.log(pred) + (1-self.labels)*numpy.log(1-pred))
     
     
@@ -147,15 +143,6 @@ class DBM(object):
 
 
 
-    #backpropagate label assignments to previous layer.       
-    def backprop_label(self, label, layers=0):
-        end = len(self.layers)-1
-        out = label
-        for i in range(min(layers,end)):
-            W = self.layers[end-i]['W']
-            out = numpy.dot(self.sigma_inverse(out), W.T)
-        return out
-
     #This step does the boltzmann part.
     def unsupervised_step(self, data, labels,rate):
         layers=len(self.layers)
@@ -163,27 +150,27 @@ class DBM(object):
         # but as the last layer communicates the
         # supervised results, this might not help you 
         # so much as just ruin all predictions.
-        for i in range(1,layers):
+        for i in range(1,layers-1):
             if i==1:
                 previous = data
             else:
                 previous = self.layers[i-1]['mu']
-            self.layers[i]['mu'] = self.sigma(numpy.dot(previous,self.layers[i]['W']))/data.shape[0]
+            self.layers[i]['mu'] = self.sigma(numpy.dot(previous,self.layers[i]['W']))
             
-            gradient_part = numpy.dot(previous.T, 
-                                      self.layers[i]['mu'])
-            approx_part = -1.0/self.fantasy_count * numpy.dot(self.layers[i-1]['fantasy'].T,
-                                                                 self.layers[i]['fantasy'])
-            self.layers[i]['W'] = self.normalize(self.layers[i]['W'] 
-                                                 + rate *(gradient_part 
-                                                 + approx_part))
+            gradient_part = - 1.0/(self.datapts*data.shape[0]) * numpy.dot(previous.T, 
+                                                          self.layers[i]['mu'])
+            approx_part =- 1.0/self.fantasy_count * numpy.dot(self.layers[i-1]['fantasy'].T,
+                                                              self.layers[i]['fantasy'])
+            self.layers[i]['W'] =( self.layers[i]['W'] 
+                                  + rate *gradient_part 
+                                  + rate *approx_part)
 
 
     #This is stochastic gradient descent version of a dropout back-propagator.
-    def dropout_step(self,data,labels,rate,weight, dropout_fraction = .5, momentum_decay = 0.25250):
+    def dropout_step(self,data,labels,rate, 
+                     dropout_fraction = .5, momentum_decay = 0.25):
         
         layers=len(self.layers)
-        scale_factor = 1.0
         for layer in range(layers-1,0,-1):
             W=self.layers[layer]['W']
             dropout = numpy.zeros(W.shape)
@@ -195,32 +182,30 @@ class DBM(object):
             self.layers[layer]['W']=W
             
         for layer in range(layers-1,0,-1):
-            prop_label=labels
-            if layer < layers-1:
-                prop_label = numpy.round(self.sigma(self.backprop_label(labels, layers-1-layer)))
-            act = self.predict_probs(data, omit_layers=layers-layer-1)
+            act = self.predict_probs(data)
             prior_act = self.predict_probs(data, omit_layers=layers-layer)
             W = self.layers[layer]['W']
+            errors = act - labels
+            for iter in range(layers-1, layer,-1):
+                source = self.layers[iter]
+                errors = source['W'].T*errors
+
             #output layer
             dropout =  self.layers[layer]['dropout array']
-            difference = act - prop_label
-            d_activated = self.d_sigma(self.sigma_inverse(act))
-            
-            #Aiming to for deviance.
-            difference = numpy.clip(difference,0.001,.9999)
-            gradient = ((-numpy.dot(prior_act.T,1/difference*d_activated)) 
-                          + numpy.dot(1-prior_act.T,1/(difference)*d_activated))
-            #scale_factor = numpy.sqrt(numpy.sum(1-dropout))*scale_factor
-            momentum = self.layers[layer]['momentum']
-            gradient_term = weight * gradient / scale_factor * (1-dropout)
-            W = W - gradient_term  -  momentum*momentum_decay
-            self.layers[layer]['momentum'] = momentum*momentum_decay + gradient_term
-            self.layers[layer]['W']=W
+
+            derivative = act* (1-act) * errors
+
+            gradient = 1.0/data.shape[0] * numpy.dot(prior_act.T,derivative)
+            momentum = momentum_decay*self.layers[layer]['momentum']
+            gradient = rate * gradient * (1-dropout)
+            W = W - gradient - momentum
+            self.layers[layer]['momentum'] = momentum + gradient
+            self.layers[layer]['W']=W# + self.l2_pressure(W)
             
         for layer in range(layers-1,0,-1):
-            W=self.normalize(self.layers[layer]['W'])
-            W = W+self.layers[layer]['dropped out'] 
-            self.layers[layer]['W'] = W+0.0001*numpy.random.randn(*W.shape)
+            W= self.layers[layer]['W']
+            W = W+self.layers[layer]['dropped out']  
+            self.layers[layer]['W'] = W +0.0001*numpy.random.randn(*W.shape)
 
 
     #Train, or continue training the model according to the training schedule for another train_iterations iterations
@@ -259,7 +244,7 @@ class DBM(object):
             self.gibbs_update(gibbs_iterations)
             data, labels = self.data_sample(self.batch_size)
             rate = self.learning_rate
-            self.unsupervised_step(data,labels,rate)
-            self.dropout_step(data,labels,rate, 10*rate)   
+            self.unsupervised_step(data, labels, rate)
+            self.dropout_step(data, labels, rate)   
         self.learning_rate=self.next_learning_rate(self.learning_rate)
 

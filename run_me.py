@@ -32,14 +32,27 @@ energy = []
 entropy = []
 accuracy = []
 print 'initializing model'
-dbm_test=DBM(dataset,labels, layers=[24,1], batch_size=100)
+dbm_test=DBM(dataset,labels, layers=[8,1], batch_size=100)
 render_output()
 
-for i in range(3):
+for i in range(2):
+    for i in range(0):
+        print 'beginning dropout training of model'
+        dbm_test.train_dropout(weight = 0.1)
+        render_output()
+
+
+    for i in range(5):
+        print 'beginning boltzmann training of model'
+        dbm_test.train_unsupervised()
+        render_output()
+dbm_test.learning_rate=1.0
+
+for i in range(0):
     print 'beginning hybrid training of model'
     dbm_test.train_hybrid()
     render_output()
-dbm_test.learning_rate=1
+dbm_test.learning_rate=1.0
 
 for i in range(1000):
     print 'beginning dropout training of model'
