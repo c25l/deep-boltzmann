@@ -5,11 +5,11 @@ class DBM(object):
     # layers: a list containing the size of each hidden layer
     # fantasy_count: The number of markov chains to run in the background
     # learning_rate: starting learning rate. Will be continued harmonically from the starting value.
-    def __init__(self,dataset,labels,
-                batch_size = 100,
+    def __init__(self,dataset,labels=numpy.array([]),
+                batch_size = 1,
                 layers=[10,2],
                 fantasy_count = 100,
-                learning_rate = .00005, ):
+                learning_rate = .005, ):
 
 
         self.dataset = dataset
@@ -54,8 +54,12 @@ class DBM(object):
     
     #Quick and dirty bootstrapper to manage samples per epoch
     def data_sample(self, num):
-        return (self.dataset[numpy.random.randint(0, self.dataset.shape[0], num)],
+        if self.labels.shape[0] > 0:
+            return (self.dataset[numpy.random.randint(0, self.dataset.shape[0], num)],
                 self.labels[numpy.random.randint(0, self.labels.shape[0], num)])
+        else:
+            return (self.dataset[numpy.random.randint(0, self.dataset.shape[0], num)],
+                numpy.array([]))
 
 
     #Returns activations for probabilities, do not use sigma here, because sampling probs directly.
@@ -157,7 +161,7 @@ class DBM(object):
                 previous = self.layers[i-1]['mu']
             self.layers[i]['mu'] = self.sigma(numpy.dot(previous,self.layers[i]['W']))
             
-            gradient_part = - 1.0/(self.datapts*data.shape[0]) * numpy.dot(previous.T, 
+            gradient_part = - 1.0/(self.datapts) * numpy.dot(previous.T, 
                                                           self.layers[i]['mu'])
             approx_part =- 1.0/self.fantasy_count * numpy.dot(self.layers[i-1]['fantasy'].T,
                                                               self.layers[i]['fantasy'])
@@ -168,12 +172,12 @@ class DBM(object):
 
     #This is stochastic gradient descent version of a dropout back-propagator.
     def dropout_step(self,data,labels,rate, 
-                     dropout_fraction = .5, momentum_decay = 0.25):
+                     dropout_fraction = 0.5, momentum_decay = 0):
         
         layers=len(self.layers)
         for layer in range(layers-1,0,-1):
             W=self.layers[layer]['W']
-            dropout = numpy.zeros(W.shape)
+            dropout = numpy.ones(W.shape)
             while numpy.min(dropout) >=1:
                 dropout = (numpy.random.rand(*W.shape)<dropout_fraction).astype(float)
             self.layers[layer]['dropout array']= dropout
@@ -193,14 +197,14 @@ class DBM(object):
             #output layer
             dropout =  self.layers[layer]['dropout array']
 
-            derivative = act* (1-act) * errors
-
-            gradient = 1.0/data.shape[0] * numpy.dot(prior_act.T,derivative)
+            derivative = act * (1-act) * errors
+            errors = act * (1-act)*errors
+            gradient = 1.0/self.datapts * numpy.dot(prior_act.T,derivative)
             momentum = momentum_decay*self.layers[layer]['momentum']
             gradient = rate * gradient * (1-dropout)
             W = W - gradient - momentum
             self.layers[layer]['momentum'] = momentum + gradient
-            self.layers[layer]['W']=W# + self.l2_pressure(W)
+            self.layers[layer]['W']=W + self.l2_pressure(W)
             
         for layer in range(layers-1,0,-1):
             W= self.layers[layer]['W']
@@ -209,7 +213,7 @@ class DBM(object):
 
 
     #Train, or continue training the model according to the training schedule for another train_iterations iterations
-    def train_unsupervised(self, train_iterations=1000, gibbs_iterations=10):
+    def train_unsupervised(self, train_iterations=10000, gibbs_iterations=10):
         for iter in range(train_iterations):
             self.gibbs_update(gibbs_iterations)
             data, labels = self.data_sample(self.batch_size)
@@ -217,34 +221,43 @@ class DBM(object):
             self.unsupervised_step(data,labels,rate)
             self.learning_rate=self.next_learning_rate(self.learning_rate)
 
-
-    #Assuming the data came in with labels, which were disregarded during the unsupervised training.
-    def train_supervised(self, train_iterations=1000, weight=.01):
-        layers=len(self.layers)
-        for iter in range(train_iterations):
-            rows, labels = self.data_sample(self.batch_size)
-            self.dropout_step(rows, labels, self.learning_rate, weight, dropout_fraction=0.0)
-
     
     #Assuming the data came in with labels, which were disregarded during the unsupervised training.
-    def train_dropout(self, train_iterations=1000, weight=1):
+    def train_dropout(self, train_iterations=10000, weight=1):
         layers=len(self.layers)
         for iter in range(train_iterations):
             rate = self.learning_rate
-            rows, labels = self.data_sample(self.batch_size)
+            rows, labels = self.data_sample(1)
             self.dropout_step(rows, labels, self.learning_rate, rate*weight)               
         self.learning_rate=self.next_learning_rate(self.learning_rate)
 
+    #Okay, so this is an attempt at prediction using a gibbs sampling technique. 
+    #The idea is that you feed in an input, but
+    #this input is incomplete. You want to make it complete by using 
+    #the information in the network, so you update the network, 
+    #and sample repeatedly, keeping in mind that the values you want are going 
+    #to be set by the mask(==1) and the unknowns will be in flux.
+    #the averages of the output values should tell you something.
+    #If the mask is none, it will just make up data given your inputs.
+    def predict(self, input, mask=None, gibbs_iterations=100):
+        input_state = {0:input}
+        layers = len(self.layers)
+        for i in range(1,layers):
+            input_state[i] = numpy.zeros((input.shape[0],self.layers[i]['W'].shape[1]))
+            
+        for j in range(gibbs_iterations):
+            for i in range(1,len(self.layers)-1):
+                input_state[i] = self.sample(self.prob_internal, (self.layers[i]['W'],
+                                                                       self.layers[i+1]['W'],
+                                                                       input_state[i-1],
+                                                                       input_state[i+1],))
 
- 
-    #Alternate boltzmann and backprop steps, this could be better than doing a lot of both, 
-    #as it helps to co-optimize the energy and entropy.
-    def train_hybrid(self, train_iterations=1000, gibbs_iterations = 100 ):
-        for iter in range(train_iterations):
-            self.gibbs_update(gibbs_iterations)
-            data, labels = self.data_sample(self.batch_size)
-            rate = self.learning_rate
-            self.unsupervised_step(data, labels, rate)
-            self.dropout_step(data, labels, rate)   
-        self.learning_rate=self.next_learning_rate(self.learning_rate)
+            input_state[layers-1] = self.sample(self.prob_given_vis, (self.layers[-1]['W'], input_state[layers-2]))
+            candidate = self.sample(self.prob_given_out, (self.layers[1]['W'], input_state[1]))
+            if mask is not None:
+                input_state[0] = candidate*(1-mask) + input_state[0]*mask 
+            else:
+                input_state[0]=candidate
+        return input_state[0]
 
+     
