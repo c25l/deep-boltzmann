@@ -5,6 +5,7 @@ This class implements a deep boltzmann machine as described by [Hinton and Salak
 
 Planned updates include: 
 
+1.  [Bias terms][3]
 1.  Greedy layerwise pretraining
 2.  [AIS estimation of partition function][2]
 3.  Use of DBM to initialize a traditional neural network.
@@ -17,3 +18,4 @@ The whole thing, is, of course, just a prototype, with no guarantees of anything
 
 [1]: https://www.cs.toronto.edu/~hinton/absps/efficientDBM.pdf
 [2]: http://www.cs.toronto.edu/~rsalakhu/papers/dbn_ais.pdf
+[3]: https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf
