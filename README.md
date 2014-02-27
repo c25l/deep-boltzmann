@@ -3,9 +3,12 @@ deep_boltzmann
 This class implements a deep boltzmann machine as described by [Hinton and Salakhutdinov][1]. There could (might (should)) be a better way to get predictions, but a prediction method using gibbs sampling and masks is implemented.
 
 
-Planned updates include: 1. Greedy layerwise pretraining
-2. [AIS estimation of partition function][2]
-3. Use of DBM to initialize a traditional neural network.
+Planned updates include: 
+1.  Greedy layerwise pretraining
+
+2.  [AIS estimation of partition function][2]
+
+3.  Use of DBM to initialize a traditional neural network.
 
 
 It also implements a dropout back-propagation for some reasonable definition thereof using stochastic gradient descent.
