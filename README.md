@@ -1,11 +1,13 @@
 deep_boltzmann
 ==============
-This class implements a deep boltzmann machine as described by [Hinton and Salakhutdinov][1]. There could (might (should)) be a better way to get predictions, but a prediction method using gibbs sampling and masks is implemented.
+This class intends to implement a deep boltzmann machine as described by [Hinton and Salakhutdinov][1]. There could (might (should)) be a better way to get predictions, but a prediction method using gibbs sampling and masks is implemented.
 
 
 Planned updates include: 
 
+
 1.  [Bias terms][3]
+1.  Better (Actual) Contrastive Divergence
 1.  Greedy layerwise pretraining
 2.  [AIS estimation of partition function][2]
 3.  Use of DBM to initialize a traditional neural network.
