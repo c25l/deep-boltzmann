@@ -4,10 +4,9 @@ This class implements a deep boltzmann machine as described by [Hinton and Salak
 
 
 Planned updates include: 
+
 1.  Greedy layerwise pretraining
-
 2.  [AIS estimation of partition function][2]
-
 3.  Use of DBM to initialize a traditional neural network.
 
 
