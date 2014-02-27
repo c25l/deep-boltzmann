@@ -9,7 +9,7 @@ Planned updates include:
 1.  Greedy layerwise pretraining
 2.  [AIS estimation of partition function][2]
 3.  Use of DBM to initialize a traditional neural network.
-
+4. [DropConnect][4]
 
 It also implements a dropout back-propagation for some reasonable definition thereof using stochastic gradient descent.
 
@@ -19,3 +19,4 @@ The whole thing, is, of course, just a prototype, with no guarantees of anything
 [1]: https://www.cs.toronto.edu/~hinton/absps/efficientDBM.pdf
 [2]: http://www.cs.toronto.edu/~rsalakhu/papers/dbn_ais.pdf
 [3]: https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf
+[4]: http://cs.nyu.edu/~wanli/dropc/dropc.pdf
