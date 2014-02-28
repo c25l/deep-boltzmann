@@ -6,10 +6,10 @@ class DBM(object):
     # fantasy_count: The number of markov chains to run in the background
     # learning_rate: starting learning rate. Will be continued harmonically from the starting value.
     def __init__(self,dataset,labels=numpy.array([]),
-                batch_size = 1,
+                batch_size = 500,
                 layers=[10,2],
-                fantasy_count = 100,
-                learning_rate = .005, ):
+                fantasy_count = 10,
+                learning_rate = .0001, ):
 
 
         self.dataset = dataset
@@ -23,12 +23,14 @@ class DBM(object):
         self.layers.append({'layer':'visible',
                             'size':self.features,
                             'fantasy': numpy.random.randint(0,2,(fantasy_count,self.features)).astype(float),
-                            'mu':0})
+                            'mu':0,
+                            'bias': numpy.zeros((1,self.features))})
         for layer in range(len(layers)):
             size = layers[layer]
             hidden = {'layer':'hidden '+str(layer), 'size':size, 'mu':0}
             above = self.layers[-1]['size']
             hidden['W'] = numpy.random.randn(above,size)
+            hidden['bias'] = numpy.random.randn(1,size)
             hidden['momentum'] = numpy.zeros((above,size))
             hidden['fantasy'] = numpy.random.randint(0,2,(fantasy_count,size)).astype(float)
             self.layers.append(hidden)
@@ -66,7 +68,7 @@ class DBM(object):
     def sample(self, fn, args):
         temp = fn(*args)
         temp_cutoff = numpy.random.rand(*temp.shape)
-        return (temp>temp_cutoff).astype(float)
+        return (temp >temp_cutoff).astype(float)
     
 
     #This propagates the test state through the net, 
@@ -76,33 +78,34 @@ class DBM(object):
         out = test
         for i in range(1,len(self.layers)-omit_layers):
             W=self.layers[i]['W']
-            out = self._predict_stage_probs(W,out)
+            bias = self.layers[i]['bias']
+            out = self._predict(W,bias,out)
             if not prop_uncertainty and i< len(self.layers)-1:
                 out =numpy.round(out)
         return out
     
-    def _predict_stage_probs(self,W,inputs):
-        return self.sigma(numpy.dot(inputs,W))
+    def _predict(self,W,bias,inputs):
+        return self.sigma(bias + numpy.dot(inputs,W))
 
 
     #The energy of a given layer with a given input and output vector
-    def _energy(self,v,W,h):
-        return -numpy.tensordot(numpy.dot(v,W),h, axes=([0,1],[0,1]))
+    def _energy(self,v,W,h,bv,bh):
+        return numpy.mean(-numpy.dot(v,bv.T) -numpy.dot(h,bh.T))- numpy.tensordot(numpy.dot(v,W),h, axes=([0,1],[0,1]))
 
     
     #The energy of the whole DBM with given inputs and hidden activations
     def internal_energy(self, v, hs):
-        temp=self._energy(v, self.layers[1]['W'], hs[0])
+        temp=self._energy(v, self.layers[1]['W'], hs[0],numpy.zeros((1,v.shape[1])),self.layers[1]['bias'])
         for i in range(1, len(self.layers)-1):
-            temp += self._energy(hs[i-1], self.layers[i+1]['W'], hs[i])
+            temp += self._energy(hs[i-1], self.layers[i+1]['W'], hs[i], self.layers[i]['bias'], self.layers[i+1]['bias'])
         return temp
 
     
     #The energy of the network given only the input activiation.
     def energy(self, v):
-        hs =  [numpy.round(self.sigma(numpy.dot(v,self.layers[1]['W'])))]
+        hs =  [numpy.round(self.sigma(self.layers[1]['bias']+numpy.dot(v,self.layers[1]['W'])))]
         for i in range(2,len(self.layers)):
-            hs.append(numpy.round(self.sigma(numpy.dot(hs[-1], self.layers[i]['W']))))
+            hs.append(numpy.round(self.sigma(self.layers[i]['bias']+numpy.dot(hs[-1], self.layers[i]['W']))))
         return self.internal_energy(v,tuple(hs))
     
 
@@ -120,31 +123,31 @@ class DBM(object):
     
     # prob_given_vis gives a vector of length j with the corresponding probs
     # subset to theappropriate entry to get hj1==1
-    def prob_given_vis(self, W, vs):
-        return self.sigma(numpy.dot(vs, W))
+    def prob_given_vis(self, W, vs,bias):
+        return self.sigma(bias + numpy.dot(vs, W))
 
 
     #prob_given_out is the same as above, but with the opposite value  and convention.
-    def prob_given_out(self, W, hs):
-        return self.sigma(numpy.dot( hs, W.T))
-
-
-    #for deeper nets, you need the above-and-below layer contributions. This aggregates both1
-    def prob_internal(self, W0, W1, vs, h2):
-        return self.sigma(numpy.dot(vs, W0)+numpy.dot(h2,  W1.T))
+    def prob_given_out(self, W, hs,bias):
+        return self.sigma(bias + numpy.dot( hs, W.T))
 
 
     #Tiny gibbs sampler for the fantasy particle updates. The numer of iterations could be controlled, but needn't be
     def gibbs_update(self, gibbs_iterations=100):
+        layers = len(self.layers)
         for j in range(gibbs_iterations):
-            self.layers[0]['fantasy'] = self.sample(self.prob_given_out, (self.layers[1]['W'], self.layers[1]['fantasy']))
-            self.layers[-1]['fantasy'] = self.sample(self.prob_given_vis, (self.layers[-1]['W'], self.layers[-2]['fantasy']))
-            for i in range(1,len(self.layers)-1):
-                self.layers[i]['fantasy'] = self.sample(self.prob_internal, (self.layers[i]['W'],
-                                                                       self.layers[i+1]['W'], 
-                                                                       self.layers[i-1]['fantasy'], 
-                                                                       self.layers[i+1]['fantasy'],))
+            for i in range(1,layers):
+                active = self.layers[i-1]['fantasy']
+                bias = self.layers[i]['bias']
+                W = self.layers[i]['W']
+                self.layers[i]['fantasy'] = self.sample(self.prob_given_vis, (W,active,bias))
+            for i in range(layers-1,1,-1):
+                active = self.layers[i]['fantasy']
+                bias = self.layers[i-1]['bias']
+                W = self.layers[i]['W']
+                self.layers[i-1]['fantasy'] = self.sample(self.prob_given_out,(W,active,bias))
 
+            
 
 
     #This step does the boltzmann part.
@@ -159,10 +162,15 @@ class DBM(object):
                 previous = data
             else:
                 previous = self.layers[i-1]['mu']
-            self.layers[i]['mu'] = self.sigma(numpy.dot(previous,self.layers[i]['W']))
-            
-            gradient_part = - 1.0/(self.datapts) * numpy.dot(previous.T, 
-                                                          self.layers[i]['mu'])
+            bias = self.layers[i]['bias']
+            mu = bias+numpy.dot(previous,self.layers[i]['W'])
+            #I came up with this bias update scheme. It's not actually
+            #in the papers, but it seems reasonable.
+            bias_part = mu.mean(axis=0).reshape(*bias.shape)
+            self.layers[i]['bias'] = bias + rate*(bias_part-bias)
+            mu = self.sigma(mu)
+            self.layers[i]['mu'] = mu 
+            gradient_part = - 1.0/(self.datapts*self.batch_size) * numpy.dot(previous.T, mu)
             approx_part =- 1.0/self.fantasy_count * numpy.dot(self.layers[i-1]['fantasy'].T,
                                                               self.layers[i]['fantasy'])
             self.layers[i]['W'] =( self.layers[i]['W'] 
@@ -239,25 +247,31 @@ class DBM(object):
     #to be set by the mask(==1) and the unknowns will be in flux.
     #the averages of the output values should tell you something.
     #If the mask is none, it will just make up data given your inputs.
-    def predict(self, input, mask=None, gibbs_iterations=100):
+    def gibbs_predict(self, input, mask=None,samples = 100,  gibbs_iterations=100):
         input_state = {0:input}
         layers = len(self.layers)
         for i in range(1,layers):
             input_state[i] = numpy.zeros((input.shape[0],self.layers[i]['W'].shape[1]))
-            
-        for j in range(gibbs_iterations):
-            for i in range(1,len(self.layers)-1):
-                input_state[i] = self.sample(self.prob_internal, (self.layers[i]['W'],
-                                                                       self.layers[i+1]['W'],
-                                                                       input_state[i-1],
-                                                                       input_state[i+1],))
+        out = []
+        for j in range(gibbs_iterations*samples):
+            for i in range(1,layers-1):
+                active = input_state[i-1]
+                bias = self.layers[i]['bias']
+                W = self.layers[i]['W']
+                input_state[i] = self.sample(self.prob_given_vis, (W,active,bias))
+            for i in range(layers-2,0,-1):
+                active = input_state[i+1]
+                bias = self.layers[i]['bias']
+                W = self.layers[i+1]['W']
+                input_state[i] = self.sample(self.prob_given_out,(W,active,bias))
 
-            input_state[layers-1] = self.sample(self.prob_given_vis, (self.layers[-1]['W'], input_state[layers-2]))
-            candidate = self.sample(self.prob_given_out, (self.layers[1]['W'], input_state[1]))
+            candidate = self.sample(self.prob_given_out, (self.layers[1]['W'], input_state[1],self.layers[0]['bias']))
             if mask is not None:
                 input_state[0] = candidate*(1-mask) + input_state[0]*mask 
             else:
                 input_state[0]=candidate
-        return input_state[0]
+            if j%gibbs_iterations == gibbs_iterations-1:
+                out.append(input_state[0])
+        return out
 
      
