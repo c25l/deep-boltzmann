@@ -20,22 +20,16 @@ class DBM(object):
         self.fantasy_count = fantasy_count
         self.learning_rate = learning_rate
         self.layers = []
-        self.layers.append({'layer':'visible',
+        self.layers.append({
                             'size':self.features,
                             'fantasy': numpy.random.randint(0,2,(fantasy_count,self.features)).astype(float),
                             'mu':0,
                             'bias':self.sigma_inverse(numpy.mean(dataset, axis=0)).reshape(1,self.features),
                             })
         for layer in range(len(layers)):
-            size = layers[layer]
-            hidden = {'layer':'hidden '+str(layer), 'size':size, 'mu':0}
-            above = self.layers[-1]['size']
-            hidden['W'] = numpy.random.randn(above,size)
-            hidden['bias'] = numpy.random.randn(1,size)
-            hidden['momentum'] = numpy.zeros((above,size))
-            hidden['fantasy'] = numpy.random.randint(0,2,(fantasy_count,size)).astype(float)
-            self.layers.append(hidden)
-         
+            self.add_layer(layers[layer])
+        
+        
     
     #Stochastic annealing scheduler. This one assures that, regardless of
     #  starting value the sequence is in l^2-l^1
@@ -161,22 +155,23 @@ class DBM(object):
                 self.layers[i-1]['fantasy'] = self.sample(self.prob_given_out,(W,active,bias, double))
 
             
-    #This is stochastic gradient descent version of a dropout back-propagator.
-    def dropout_step(self,data,labels,rate, 
-                     dropout_fraction = 0.5, momentum_decay = 0):
-        
+    #This is stochastic gradient descent version of a dropc back-propagator.
+    def dropc_step(self,data,labels,rate, 
+                     dropout_fraction = 0, momentum_decay = 0, train_layers=1):
+        assert labels != None, 'no labels defined' 
         layers=len(self.layers)
-        for layer in range(layers-1,0,-1):
+        min = layers-train_layers -1
+        for layer in range(layers-1,min,-1):
             W=self.layers[layer]['W']
             dropout = numpy.ones(W.shape)
-            while numpy.min(dropout) >=1:
+            #really don't want to drop all the connections. Just in case...
+            while numpy.min(dropout) >=1 and dropout_fraction>0:
                 dropout = (numpy.random.rand(*W.shape)<dropout_fraction).astype(float)
             self.layers[layer]['dropout array']= dropout
             self.layers[layer]['dropped out'] = W*dropout
             W = W-self.layers[layer]['dropped out']
             self.layers[layer]['W']=W
-            
-        for layer in range(layers-1,0,-1):
+        for layer in range(layers-1,min,-1):
             act = self.predict_probs(data)
             prior_act = self.predict_probs(data, omit_layers=layers-layer)
             W = self.layers[layer]['W']
@@ -184,7 +179,6 @@ class DBM(object):
             for iter in range(layers-1, layer,-1):
                 source = self.layers[iter]
                 errors = source['W'].T*errors
-
             #output layer
             dropout =  self.layers[layer]['dropout array']
 
@@ -196,8 +190,7 @@ class DBM(object):
             W = W - gradient - momentum
             self.layers[layer]['momentum'] = momentum + gradient
             self.layers[layer]['W']=W + self.l2_pressure(W)
-            
-        for layer in range(layers-1,0,-1):
+        for layer in range(layers-1,min,-1):
             W= self.layers[layer]['W']
             W = W+self.layers[layer]['dropped out']  
             self.layers[layer]['W'] = W +0.0001*numpy.random.randn(*W.shape)
@@ -235,12 +228,11 @@ class DBM(object):
     
 
     #Assuming the data came in with labels, which were disregarded during the unsupervised training.
-    def train_dropout(self, train_iterations=10000, weight=1):
-        layers=len(self.layers)
+    def train_dropc(self, train_iterations=10000, weight=1, layers = 1):
         for iter in range(train_iterations):
             rate = self.learning_rate
             rows, labels = self.data_sample(1)
-            self.dropout_step(rows, labels, self.learning_rate, rate*weight)               
+            self.dropc_step(rows, labels, self.learning_rate, rate*weight, layers)               
         self.learning_rate=self.next_learning_rate(self.learning_rate)
 
     #Okay, so this is an attempt at prediction using a gibbs sampling technique. 
@@ -280,6 +272,9 @@ class DBM(object):
                 out.append(input_state[0])
         return out
 
+    #This detpred method sounds the inputs into the DBM and reads the echo
+    #from the back of the network. Definitely not the way to do this, but its'
+    #faster and conceptually cheaper than the AIS methods.
     def deterministic_predict(self, input, mask=None,  stop_layer = None):
         layers = len(self.layers)
         input_state = {0:input}
@@ -306,3 +301,13 @@ class DBM(object):
         return input_state[0]
 
     
+    #append new layers to existing objects!
+    def add_layer(self, size): 
+        hidden = {'size':size, 'mu':0}
+        above = self.layers[-1]['size']
+        hidden['W'] = numpy.random.randn(above,size)
+        hidden['bias'] = numpy.random.randn(1,size)
+        hidden['momentum'] = numpy.zeros((above,size))
+        hidden['fantasy'] = numpy.random.randint(0,2,(self.fantasy_count,size)).astype(float)
+        self.layers.append(hidden)
+           
