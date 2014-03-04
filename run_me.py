@@ -16,7 +16,7 @@ def render_supervised(i):
     joblib.dump(entropy, 'output/dbm_entropy')
     joblib.dump(accuracy, 'output/dbm_accuracy')
 
-dataset = np.round(np.random.rand(1000000, 1))
+dataset = np.round(np.random.rand(10000, 1))
 labels = 1-dataset
 dataset = np.append(dataset,1-dataset,axis=1)
 dataset = np.append(dataset,np.ones((dataset.shape[0],1)),axis=1)
@@ -27,11 +27,11 @@ energy = []
 entropy = []
 accuracy = []
 print 'initializing model'
-dbm_test=DBM(dataset,layers=[30, 20,10])
-render_output(1,1)
+dbm_test=DBM(dataset,layers=[])#[30, 20,10])
+#render_output(1,1)
 
 for k in range(1,4):
-    for i in range(150):
+    for i in range(0):
         print 'beginning boltzmann training of model'
         dbm_test.train_unsupervised(k)
         render_output(i,k)
@@ -39,7 +39,15 @@ for k in range(1,4):
 dbm_test.learning_rate = 1
 dbm_test.add_layer(1)
 dbm_test.labels = labels
-for i in range(10000):
+#Adapt the output layer to the network
+for i in range(100):
+    #train dropc
+    dbm_test.train_dropc(layers=1)
+    render_output(i,4)
+    render_supervised(i)
+
+#Train the whole thing towards a minimum.
+for i in range(100):
     #train dropc
     dbm_test.train_dropc()
     render_output(i,4)

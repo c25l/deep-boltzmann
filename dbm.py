@@ -8,7 +8,7 @@ class DBM(object):
     def __init__(self,dataset,labels=numpy.array([]),
                 batch_size = 50,
                 layers=[10,2],
-                fantasy_count = 10,
+                fantasy_count = 100,
                 learning_rate = .0001, ):
 
 
@@ -38,7 +38,7 @@ class DBM(object):
     
     
     def l2_pressure(self,weights):
-        norms = numpy.sqrt(numpy.sum(weights*weights, axis=0))
+        norms = numpy.clip(numpy.sqrt(numpy.sum(weights*weights, axis=0)),.00001,10000)
         norms = numpy.floor(1/norms.reshape(norms.shape[0],1))
         norms = norms.T.repeat(weights.shape[0], axis=0)
         out = norms*weights
@@ -157,34 +157,34 @@ class DBM(object):
             
     #This is stochastic gradient descent version of a dropc back-propagator.
     def dropc_step(self,data,labels,rate, 
-                     dropout_fraction = 0, momentum_decay = 0, train_layers=1):
-        assert labels != None, 'no labels defined' 
+                     dropout_fraction = 0.0, momentum_decay = 0, train_layers=None):
+        min = 0
         layers=len(self.layers)
-        min = layers-train_layers -1
+        if train_layers is not None:
+            min = layers-train_layers -1
         for layer in range(layers-1,min,-1):
             W=self.layers[layer]['W']
             dropout = numpy.ones(W.shape)
             #really don't want to drop all the connections. Just in case...
-            while numpy.min(dropout) >=1 and dropout_fraction>0:
+            while numpy.min(dropout) >=1 and dropout_fraction>.001:
                 dropout = (numpy.random.rand(*W.shape)<dropout_fraction).astype(float)
             self.layers[layer]['dropout array']= dropout
             self.layers[layer]['dropped out'] = W*dropout
             W = W-self.layers[layer]['dropped out']
             self.layers[layer]['W']=W
+        act = self.predict_probs(data)
+        errors = act - labels
         for layer in range(layers-1,min,-1):
-            act = self.predict_probs(data)
             prior_act = self.predict_probs(data, omit_layers=layers-layer)
             W = self.layers[layer]['W']
-            errors = act - labels
             for iter in range(layers-1, layer,-1):
                 source = self.layers[iter]
                 errors = source['W'].T*errors
             #output layer
             dropout =  self.layers[layer]['dropout array']
 
-            derivative = act * (1-act) * errors
             errors = act * (1-act)*errors
-            gradient = 1.0/self.datapts * numpy.dot(prior_act.T,derivative)
+            gradient = 1.0/data.shape[0] * numpy.dot(prior_act.T,errors)
             momentum = momentum_decay*self.layers[layer]['momentum']
             gradient = rate * gradient * (1-dropout)
             W = W - gradient - momentum
@@ -217,7 +217,7 @@ class DBM(object):
             else:
                 mu = self.sigma(mu)
             self.layers[layer]['mu'] = mu 
-            gradient_part = - 1.0/(self.datapts*self.batch_size) * numpy.dot(previous.T, mu)
+            gradient_part = - 1.0/(self.batch_size) * numpy.dot(previous.T, mu)
             approx_part =- 1.0/self.fantasy_count * numpy.dot(self.layers[layer-1]['fantasy'].T,
                                                               self.layers[layer]['fantasy'])
             W =( self.layers[layer]['W'] 
@@ -228,11 +228,11 @@ class DBM(object):
     
 
     #Assuming the data came in with labels, which were disregarded during the unsupervised training.
-    def train_dropc(self, train_iterations=10000, weight=1, layers = 1):
+    def train_dropc(self, train_iterations=10000, weight=.1, layers = None):
         for iter in range(train_iterations):
             rate = self.learning_rate
-            rows, labels = self.data_sample(1)
-            self.dropc_step(rows, labels, self.learning_rate, rate*weight, layers)               
+            rows, labels = self.data_sample(self.batch_size)
+            self.dropc_step(self.dataset, self.labels, rate*weight, train_layers=layers)               
         self.learning_rate=self.next_learning_rate(self.learning_rate)
 
     #Okay, so this is an attempt at prediction using a gibbs sampling technique. 

@@ -8,10 +8,11 @@ Planned features include:
 
 1.  [Bias terms][3] (done)
 1.  [Better (Actual) Contrastive Divergence][1] (done)
+1.  Persistent Markov upgrade to CD (done)
 1.  Greedy layerwise pretraining (done)
 2.  [AIS estimation of partition function][2]
 3.  Use of DBM to initialize a traditional neural network. (done, naively)
-4. [DropConnect][4]
+4. [DropConnect][4] (acccidentally implemented instead of dropout. Seems to work okay)
 
 It also implements a dropout back-propagation for some reasonable definition thereof using stochastic gradient descent.
 
