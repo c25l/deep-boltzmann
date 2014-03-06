@@ -12,7 +12,8 @@ Planned features include:
 1.  Greedy layerwise pretraining (done)
 2.  [AIS estimation of partition function][2]
 3.  Use of DBM to initialize a traditional neural network. (done, naively)
-4. [DropConnect][4] (acccidentally implemented instead of dropout. Seems to work okay)
+3. [DropOut][6] 
+4. [DropConnect][4] (recently removed due to poor performance) 
 
 It also implements a dropout back-propagation for some reasonable definition thereof using stochastic gradient descent.
 
@@ -24,3 +25,4 @@ The whole thing, is, of course, just a prototype, with no guarantees of anything
 [3]: https://www.cs.toronto.edu/~hinton/absps/guideTR.pdf
 [4]: http://cs.nyu.edu/~wanli/dropc/dropc.pdf
 [5]: https://www.cs.toronto.edu/~hinton/absps/dbm.pdf
+[6]: http://arxiv.org/pdf/1207.0580

@@ -41,14 +41,14 @@ dbm_test.add_layer(1)
 dbm_test.labels = labels
 #Adapt the output layer to the network
 for i in range(100):
-    #train dropc
-    dbm_test.train_dropc(layers=1)
+    #train backprop
+    dbm_test.train_backprop(layers=1)
     render_output(i,4)
     render_supervised(i)
 
 #Train the whole thing towards a minimum.
 for i in range(100):
-    #train dropc
-    dbm_test.train_dropc()
+    #train backprop
+    dbm_test.train_backprop()
     render_output(i,4)
     render_supervised(i)
