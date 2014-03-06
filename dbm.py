@@ -157,7 +157,7 @@ class DBM(object):
              
 
     #Assuming the data came in with labels, which were disregarded during the unsupervised training.
-    def train_backprop(self, train_iterations=10000, weight=.1, layers = None):
+    def train_backprop(self, train_iterations=10000, weight=1, layers = None):
         for iter in range(train_iterations):
             rate = self.learning_rate
             rows, labels = self.data_sample(self.batch_size)
@@ -183,12 +183,14 @@ class DBM(object):
             W = self.layers[layer]['W']
             b = self.layers[layer]['bias']
             for iter in range(layers-1, layer,-1):
+                use_W  = self.layers[layer]['W']
                 prior_act = self.predict_probs(data, omit_layers=layers-iter)
-                errors = errors*prior_act*(1-prior_act)
+                weight_errors = numpy.dot(weight_errors*prior_act*(1-prior_act),W.T)
             #output layer
             
-            errors = act * (1-act)*errors
-            gradient = 1.0/data.shape[0] * numpy.dot(prior_act.T,errors)
+            prior_act = self.predict_probs(data, omit_layers=layers-layer)
+            weight_errors = act * (1-act)*weight_errors
+            gradient = 1.0/data.shape[0] * numpy.dot(prior_act.T,weight_errors)
             W = W - rate * gradient
             self.layers[layer]['W']=W + self.l2_pressure(W)
 

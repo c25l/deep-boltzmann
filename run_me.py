@@ -36,10 +36,12 @@ for k in range(1,4):
         dbm_test.train_unsupervised(k)
         render_output(i,k)
 
-dbm_test.learning_rate = 1
+dbm_test.learning_rate = .5
 dbm_test.add_layer(1)
 dbm_test.labels = labels
 #Adapt the output layer to the network
+render_output(-1,4)
+render_supervised(-1)
 for i in range(100):
     #train backprop
     dbm_test.train_backprop(layers=1)
