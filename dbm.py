@@ -157,12 +157,12 @@ class DBM(object):
              
 
     #Assuming the data came in with labels, which were disregarded during the unsupervised training.
-    def train_backprop(self, train_iterations=10000, weight=1, layers = None):
+    def train_backprop(self, train_iterations=100, weight=1, layers = None):
         for iter in range(train_iterations):
             rate = self.learning_rate
             rows, labels = self.data_sample(self.batch_size)
             self.backprop_step(self.dataset, self.labels, rate*weight, train_layers=layers)  
-        self.learning_rate=self.next_learning_rate(self.learning_rate)
+        #self.learning_rate=self.next_learning_rate(self.learning_rate)
 
 
     #This is stochastic gradient descent version of a back-propagator.
@@ -178,19 +178,24 @@ class DBM(object):
         for layer in range(layers-1,min,-1):
             #Actuals
             act = self.predict_probs(data)
-            weight_errors =  (act - labels)*act*(1-act)
+            use_W = self.layers[layers-1]['W']
+            weight_errors =  numpy.mean((act-labels)*act*(1-act),axis=0)* use_W
             bias_errors = (act-labels)*act*(1-act)
             W = self.layers[layer]['W']
             b = self.layers[layer]['bias']
             for iter in range(layers-1, layer,-1):
                 use_W  = self.layers[layer]['W']
                 prior_act = self.predict_probs(data, omit_layers=layers-iter)
-                weight_errors = numpy.dot(weight_errors*prior_act*(1-prior_act),W.T)
-            #output layer
-            
-            prior_act = self.predict_probs(data, omit_layers=layers-layer)
-            weight_errors = act * (1-act)*weight_errors
-            gradient = 1.0/data.shape[0] * numpy.dot(prior_act.T,weight_errors)
+                prior_act = numpy.mean(prior_act*(1-prior_act), axis=0)
+                priot_act = prior_act.reshape(prior_act.shape[0],1)
+                print prior_act.shape, weight_errors.shape, use_W.shape
+                weight_errors = prior_act*weight_errors
+                        
+                print prior_act.shape, weight_errors.shape, use_W.shape
+                weight_errors = numpy.dot(weight_errors, use_W)
+            #output layer       
+            prior_act = self.predict_probs(data, omit_layers=layers-layer-1)
+            gradient = 1.0/data.shape[0] * weight_errors
             W = W - rate * gradient
             self.layers[layer]['W']=W + self.l2_pressure(W)
 
@@ -198,6 +203,7 @@ class DBM(object):
     #Train, or continue training the model according to the training schedule for another train_iterations iterations
     def train_unsupervised(self, layer, train_iterations=10000, gibbs_iterations=10):
         layers=len(self.layers)
+        assert layer<layers, "Not enough layers to train specified layer" + str(layers) + " vs " + str(layer)
         for iter in range(train_iterations):
             self.gibbs_update(gibbs_iterations,layer)
             data, labels = self.data_sample(self.batch_size)
