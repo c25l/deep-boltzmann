@@ -31,7 +31,7 @@ dbm_test=DBM(dataset,layers=[30,20])
 #render_output(1,1)
 
 for k in range(1,3):
-    for i in range(0):
+    for i in range(10):
         print 'beginning boltzmann training of model'
         dbm_test.train_unsupervised(k)
         render_output(i,k)
@@ -42,14 +42,14 @@ dbm_test.labels = labels
 #Adapt the output layer to the network
 render_output(-1,4)
 render_supervised(-1)
-for i in range(1):
+for i in range(20):
     #train backprop
     dbm_test.train_backprop(layers=1)
     render_output(i,4)
     render_supervised(i)
 
 #Train the whole thing towards a minimum.
-for i in range(1):
+for i in range(20):
     #train backprop
     dbm_test.train_backprop()
     render_output(i,4)

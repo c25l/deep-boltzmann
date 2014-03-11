@@ -173,28 +173,24 @@ class DBM(object):
         if train_layers is not None:
             min = layers-train_layers -1
         
-        
         #Backpropagate
         for layer in range(layers-1,min,-1):
-            #Actuals
             act = self.predict_probs(data)
             use_W = self.layers[layers-1]['W']
             weight_errors =  numpy.mean((act-labels)*act*(1-act),axis=0)* use_W
             bias_errors = (act-labels)*act*(1-act)
-            W = self.layers[layer]['W']
-            b = self.layers[layer]['bias']
+
+            #Actuals
             for iter in range(layers-1, layer,-1):
-                use_W  = self.layers[layer]['W']
+                use_W  = self.layers[iter-1]['W']
                 prior_act = self.predict_probs(data, omit_layers=layers-iter)
                 prior_act = numpy.mean(prior_act*(1-prior_act), axis=0)
-                priot_act = prior_act.reshape(prior_act.shape[0],1)
-                print prior_act.shape, weight_errors.shape, use_W.shape
+                prior_act = prior_act.reshape(prior_act.shape[0],1)
                 weight_errors = prior_act*weight_errors
-                        
-                print prior_act.shape, weight_errors.shape, use_W.shape
-                weight_errors = numpy.dot(weight_errors, use_W)
+                weight_errors = numpy.dot(use_W, weight_errors)
             #output layer       
-            prior_act = self.predict_probs(data, omit_layers=layers-layer-1)
+            W = self.layers[layer]['W']
+            b = self.layers[layer]['bias']
             gradient = 1.0/data.shape[0] * weight_errors
             W = W - rate * gradient
             self.layers[layer]['W']=W + self.l2_pressure(W)
